@@ -502,7 +502,7 @@ rm -rf /tmp/Borealis-cursors
 
 # --- Wallpaper ---
 # Ref: https://github.com/oSoWoSo/void-artwork (CC-BY-4.0 licensed)
-echo "   Downloading Void Linux wallpaper..."
+echo "   Downloading Void Linux wallpapers..."
 sudo mkdir -p /usr/share/backgrounds/void
 sudo curl -sSLo /usr/share/backgrounds/void/void-wallpaper.png \
   "https://raw.githubusercontent.com/oSoWoSo/void-artwork/website/assets/hires/027.png"
@@ -513,6 +513,33 @@ if [ ! -s "$VOID_WALL" ]; then
   echo "   (wallpaper download failed — set manually)"
   VOID_WALL="/usr/share/backgrounds/gnome/adwaita-l.jxl"
 fi
+
+# Register wallpapers in GNOME background properties so they appear in
+# Settings > Appearance. GNOME doesn't scan directories — it reads XML files.
+sudo mkdir -p /usr/share/gnome-background-properties
+cat <<'BGXML' | sudo tee /usr/share/gnome-background-properties/void-wallpapers.xml > /dev/null
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE wallpapers SYSTEM "gnome-wp-list.dtd">
+<wallpapers>
+  <wallpaper deleted="false">
+    <name>Void Linux</name>
+    <filename>/usr/share/backgrounds/void/void-wallpaper.png</filename>
+    <options>zoom</options>
+    <shade_type>solid</shade_type>
+    <pcolor>#000000</pcolor>
+    <scolor>#000000</scolor>
+  </wallpaper>
+  <wallpaper deleted="false">
+    <name>Void Linux 2</name>
+    <filename>/usr/share/backgrounds/void/void-wallpaper-2.png</filename>
+    <options>zoom</options>
+    <shade_type>solid</shade_type>
+    <pcolor>#000000</pcolor>
+    <scolor>#000000</scolor>
+  </wallpaper>
+</wallpapers>
+BGXML
+echo "   Wallpapers registered in GNOME background properties."
 
 # --- GNOME Extensions ---
 # Install gnome-shell-extension-installer CLI tool for unattended installs
