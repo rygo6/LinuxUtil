@@ -2,6 +2,7 @@
 # =============================================================================
 # Void Linux + GNOME Install Script
 # =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Sources:
 #   Reddit: https://reddit.com/r/voidlinux/comments/1ar05zg/guide_void_gnome/
 #   Gist:   https://gist.github.com/nerdyslacker/398671398915888f977b8bddb33ab1f1
@@ -500,25 +501,21 @@ rm -rf /tmp/Borealis-cursors
 
 # --- Wallpaper + GRUB Theme ---
 # Ref: https://github.com/oSoWoSo/void-artwork (CC-BY-4.0 licensed)
-# Clone once, copy out wallpapers and GRUB theme, then clean up.
-echo "   Downloading Void Linux artwork (wallpapers + GRUB theme)..."
-rm -rf /tmp/void-artwork
-git clone --depth 1 -b website https://github.com/oSoWoSo/void-artwork /tmp/void-artwork
+# Artwork is bundled in the artwork/ directory of this repo.
+echo "   Installing Void Linux artwork (wallpapers + GRUB theme)..."
 
 # Copy wallpapers
 sudo mkdir -p /usr/share/backgrounds/void
-sudo cp /tmp/void-artwork/assets/hires/027.png /usr/share/backgrounds/void/void-wallpaper.png
-sudo cp /tmp/void-artwork/assets/hires/049.png /usr/share/backgrounds/void/void-wallpaper-2.png
-sudo cp /tmp/void-artwork/assets/hires/053.png /usr/share/backgrounds/void/void-wallpaper-3.png
-sudo cp /tmp/void-artwork/assets/hires/026.png /usr/share/backgrounds/void/void-wallpaper-4.png
-sudo cp /tmp/void-artwork/assets/hires/025.png /usr/share/backgrounds/void/void-wallpaper-5.png
+sudo cp "$SCRIPT_DIR/artwork/wallpapers/void-wallpaper.png"   /usr/share/backgrounds/void/void-wallpaper.png
+sudo cp "$SCRIPT_DIR/artwork/wallpapers/void-wallpaper-2.png" /usr/share/backgrounds/void/void-wallpaper-2.png
+sudo cp "$SCRIPT_DIR/artwork/wallpapers/void-wallpaper-3.png" /usr/share/backgrounds/void/void-wallpaper-3.png
+sudo cp "$SCRIPT_DIR/artwork/wallpapers/void-wallpaper-4.png" /usr/share/backgrounds/void/void-wallpaper-4.png
+sudo cp "$SCRIPT_DIR/artwork/wallpapers/void-wallpaper-5.png" /usr/share/backgrounds/void/void-wallpaper-5.png
 
 # Copy GRUB theme
 sudo mkdir -p /boot/grub/themes
 sudo rm -rf /boot/grub/themes/void3
-sudo cp -r /tmp/void-artwork/assets/grub/themes/void3 /boot/grub/themes/
-
-rm -rf /tmp/void-artwork
+sudo cp -r "$SCRIPT_DIR/artwork/grub/themes/void3" /boot/grub/themes/
 
 VOID_WALL="/usr/share/backgrounds/void/void-wallpaper.png"
 if [ ! -s "$VOID_WALL" ]; then
