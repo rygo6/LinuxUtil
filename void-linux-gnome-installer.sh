@@ -597,7 +597,7 @@ color-scheme='prefer-dark'
 font-name='Inter Regular 11'
 document-font-name='Inter Regular 11'
 monospace-font-name='JetBrains Mono Regular 10'
-gtk-theme='Fluent-Dark'
+gtk-theme='Fluent-dark'
 icon-theme='Fluent-grey-dark'
 cursor-theme='Borealis-cursors'
 cursor-size=24
@@ -614,7 +614,7 @@ picture-options='zoom'
 picture-uri='file://${VOID_WALL}'
 
 [org/gnome/shell/extensions/user-theme]
-name='Fluent-Dark'
+name='Fluent-dark'
 
 [org/gnome/shell]
 enabled-extensions=${EXTENSIONS_DCONF}
@@ -788,33 +788,109 @@ sudo chmod +x /etc/sv/psd/*
 rm -rf /tmp/runit-services-psd
 
 ###############################################################################
-# Bash aliases — from gist
-# Creates xbps shortcuts for common package management tasks
+# Hibernate on Lid Close
+#
+# Requires: swap partition >= RAM, resume kernel param, dracut resume module,
+# elogind HandleLidSwitch=hibernate, and polkit permissions.
+#
+# The void-installer should have created a swap partition. This section
+# verifies it's large enough for hibernation and configures the rest.
 ###############################################################################
-echo ">>> Setting up bash aliases..."
-cat > ~/.bash_aliases << 'ALIASES'
-alias xu='sudo xbps-install xbps && sudo xbps-install -Suv'
-alias xin='sudo xbps-install'
-alias xr='sudo xbps-remove -Rcon'
-alias xl='xbps-query -l'
-alias xf='xl | grep'
-alias xs='xbps-query -Rs'
-alias xd='xbps-query -x'
-alias clrk='sudo vkpurge rm all && sudo rm -rf /var/cache/xbps/*'
-alias halt='sudo halt'
-alias poweroff='sudo poweroff'
-alias reboot='sudo reboot'
-alias shutdown='sudo shutdown'
-ALIASES
+echo ">>> Configuring hibernate on lid close..."
 
-# Source aliases from .bashrc if not already configured
-if ! grep -q 'bash_aliases' ~/.bashrc 2>/dev/null; then
-  cat >> ~/.bashrc << 'BASHRC'
+# --- Verify swap exists and is large enough for hibernation ---
+RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+SWAP_TOTAL_KB=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+RAM_MB=$((RAM_KB / 1024))
+SWAP_MB=$((SWAP_TOTAL_KB / 1024))
 
-if [ -f ~/.bash_aliases ]; then
-    . ~/.bash_aliases;
-fi
-BASHRC
+if [ "$SWAP_TOTAL_KB" -eq 0 ]; then
+  echo ""
+  echo "   ⚠ ERROR: No swap detected. Hibernation requires a swap partition"
+  echo "   at least as large as your RAM (${RAM_MB}MB)."
+  echo "   Create a swap partition and re-run this script, or configure manually."
+  echo "   Skipping hibernate configuration."
+  echo ""
+elif [ "$SWAP_TOTAL_KB" -lt "$RAM_KB" ]; then
+  echo ""
+  echo "   ⚠ ERROR: Swap is too small for hibernation."
+  echo "   RAM: ${RAM_MB}MB | Swap: ${SWAP_MB}MB"
+  echo "   Swap must be >= RAM size. Resize your swap partition and re-run,"
+  echo "   or configure hibernate manually."
+  echo "   Skipping hibernate configuration."
+  echo ""
+else
+  echo "   Swap OK: ${SWAP_MB}MB swap >= ${RAM_MB}MB RAM"
+
+  # --- Configure GRUB with resume parameters ---
+  SWAP_PART=$(swapon --show=NAME --noheadings 2>/dev/null | head -1)
+  SWAP_DEV=""
+  if [ -n "$SWAP_PART" ]; then
+    SWAP_DEV="UUID=$(blkid -s UUID -o value "$SWAP_PART" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$SWAP_DEV" ] && [ "$SWAP_DEV" != "UUID=" ]; then
+    echo "   Configuring GRUB resume parameters..."
+    RESUME_PARAM="resume=${SWAP_DEV}"
+
+    if [ -f /etc/default/grub ]; then
+      if ! grep -q 'resume=' /etc/default/grub; then
+        sudo sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=\"|GRUB_CMDLINE_LINUX_DEFAULT=\"${RESUME_PARAM} |" /etc/default/grub
+        echo "   Added '${RESUME_PARAM}' to GRUB_CMDLINE_LINUX_DEFAULT"
+        if [ -d /boot/grub ]; then
+          sudo grub-mkconfig -o /boot/grub/grub.cfg
+        elif [ -d /boot/efi/EFI ]; then
+          sudo grub-mkconfig -o /boot/efi/EFI/void/grub.cfg 2>/dev/null || \
+          sudo grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
+        fi
+        echo "   GRUB configuration regenerated."
+      else
+        echo "   GRUB already has resume= parameter — skipping."
+      fi
+    fi
+  else
+    echo "   ⚠ Could not determine swap partition UUID for resume parameter."
+    echo "   Configure resume= in /etc/default/grub manually."
+  fi
+
+  # --- Dracut: ensure resume module is included in initramfs ---
+  echo "   Configuring dracut to include resume module..."
+  if [ ! -f /etc/dracut.conf.d/resume.conf ]; then
+    sudo mkdir -p /etc/dracut.conf.d
+    echo 'add_dracutmodules+=" resume "' | sudo tee /etc/dracut.conf.d/resume.conf > /dev/null
+    echo "   Created /etc/dracut.conf.d/resume.conf"
+    echo "   Rebuilding initramfs..."
+    sudo xbps-reconfigure -f linux-mainline
+  fi
+
+  # --- elogind: hibernate on lid close ---
+  echo "   Configuring elogind for hibernate on lid close..."
+  sudo mkdir -p /etc/elogind/logind.conf.d
+  cat <<'EOF' | sudo tee /etc/elogind/logind.conf.d/hibernate-on-lid.conf > /dev/null
+[Login]
+HandleLidSwitch=hibernate
+HandleLidSwitchExternalPower=hibernate
+HandleLidSwitchDocked=ignore
+EOF
+  echo "   Created /etc/elogind/logind.conf.d/hibernate-on-lid.conf"
+
+  # --- Polkit: allow users in wheel group to hibernate without password ---
+  echo "   Configuring polkit to allow hibernate..."
+  sudo mkdir -p /etc/polkit-1/rules.d
+  cat <<'EOF' | sudo tee /etc/polkit-1/rules.d/10-enable-hibernate.rules > /dev/null
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.hibernate" ||
+         action.id == "org.freedesktop.login1.hibernate-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.hibernate-ignore-inhibit" ||
+         action.id == "org.freedesktop.login1.handle-hibernate-key") &&
+        subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+    }
+});
+EOF
+  echo "   Created /etc/polkit-1/rules.d/10-enable-hibernate.rules"
+  echo "   Hibernate on lid close configured."
+  echo ""
 fi
 
 ###############################################################################
