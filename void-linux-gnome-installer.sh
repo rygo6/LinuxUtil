@@ -39,6 +39,128 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -e
 
 ###############################################################################
+# Parse arguments
+###############################################################################
+SETUP_EXTENSIONS_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --setup-extensions) SETUP_EXTENSIONS_ONLY=true ;;
+  esac
+done
+
+###############################################################################
+# Extension setup function — used by both full install and --setup-extensions
+###############################################################################
+setup_extensions() {
+  # --- GNOME Extensions ---
+  # Install gnome-shell-extension-installer CLI tool for unattended installs
+  echo "   Installing GNOME Shell Extension Installer..."
+  curl -sSLo /tmp/gnome-shell-extension-installer \
+    "https://github.com/brunelli/gnome-shell-extension-installer/raw/master/gnome-shell-extension-installer"
+  chmod +x /tmp/gnome-shell-extension-installer
+  sudo mv /tmp/gnome-shell-extension-installer /usr/local/bin/
+
+  # Get current GNOME Shell version for extension compatibility
+  GNOME_VER=$(gnome-shell --version 2>/dev/null | grep -oP '[0-9]+' | head -1 || echo "")
+  echo "   GNOME Shell version: $GNOME_VER"
+  echo "   Installing extensions..."
+
+  # Track installed extension UUIDs for auto-enabling via dconf
+  INSTALLED_UUIDS=()
+
+  # Extension IDs from extensions.gnome.org
+  #
+  # Trimmed from original gist for GNOME 48 compatibility.
+  # Many original extensions are abandoned or now built into GNOME 43+ Quick
+  # Settings (Bluetooth, audio device switching, power/suspend controls).
+  # User Themes is provided by the gnome-shell-extensions system package.
+  EXTENSIONS=(
+    517   # Caffeine
+    4839  # Clipboard History
+    307   # Dash to Dock
+    904   # Disconnect Wifi
+    2     # Frippery Move Clock
+    755   # Hibernate Status Button
+    1218  # Printers
+    1634  # Resource Monitor
+  )
+
+  for EXT_ID in "${EXTENSIONS[@]}"; do
+    gnome-shell-extension-installer "$EXT_ID" --yes 2>/dev/null || \
+      echo "   Warning: extension $EXT_ID failed to install"
+  done
+
+  # Collect UUIDs of all installed extensions to auto-enable them
+  for EXT_DIR in "${HOME}"/.local/share/gnome-shell/extensions/*/; do
+    if [ -f "${EXT_DIR}metadata.json" ]; then
+      UUID=$(grep -oP '"uuid"\s*:\s*"\K[^"]+' "${EXT_DIR}metadata.json" 2>/dev/null || true)
+      if [ -n "$UUID" ]; then
+        INSTALLED_UUIDS+=("'${UUID}'")
+      fi
+    fi
+  done
+
+  # User Themes is provided by the gnome-shell-extensions system package
+  # (installed earlier) — add its UUID so it gets enabled too
+  INSTALLED_UUIDS+=("'user-theme@gnome-shell-extensions.gcampax.github.com'")
+
+  echo "   Extensions installed and will be auto-enabled on first login."
+
+  # --- Apply extension dconf settings ---
+  echo "   Writing extension dconf settings (Caffeine, Dash to Dock, User Theme)..."
+
+  # Build the enabled-extensions line from collected UUIDs
+  EXTENSIONS_DCONF="[]"
+  if [ ${#INSTALLED_UUIDS[@]} -gt 0 ]; then
+    EXTENSIONS_DCONF="[$(IFS=, ; echo "${INSTALLED_UUIDS[*]}")]"
+  fi
+
+  # Ensure dconf directory exists for the user
+  DCONF_DB="${HOME}/.config/dconf"
+  mkdir -p "$DCONF_DB"
+
+  dbus-launch dconf load / <<EXTDCONF
+[org/gnome/shell/extensions/caffeine]
+cli-toggle=true
+enable-mpris=true
+indicator-position-max=2
+
+[org/gnome/shell/extensions/dash-to-dock]
+apply-custom-theme=false
+background-opacity=0.80000000000000004
+dash-max-icon-size=48
+dock-fixed=true
+dock-position='BOTTOM'
+height-fraction=0.90000000000000002
+preferred-monitor=-2
+preferred-monitor-by-connector='eDP-1'
+transparency-mode='FIXED'
+
+[org/gnome/shell/extensions/user-theme]
+name='Fluent-dark'
+
+[org/gnome/shell]
+disabled-extensions=@as []
+enabled-extensions=${EXTENSIONS_DCONF}
+
+EXTDCONF
+
+  echo "   Extension setup complete."
+}
+
+###############################################################################
+# If --setup-extensions was passed, run only the extension setup and exit
+###############################################################################
+if $SETUP_EXTENSIONS_ONLY; then
+  echo ">>> Running extension setup only..."
+  setup_extensions
+  echo ""
+  echo "Done! Extensions installed and configured."
+  echo "Log out and back in (or restart GNOME Shell) for changes to take effect."
+  exit 0
+fi
+
+###############################################################################
 # Assumes: Fresh install from Void Linux BASE live image (not Xfce)
 #   - void-installer was used with "Network" source
 #   - A non-root user was created (added to wheel group by installer)
@@ -107,6 +229,9 @@ sudo xbps-install -S -y xdg-desktop-portal xdg-desktop-portal-gtk \
 
 # GNOME browser connector (for Shell extensions via browser)
 sudo xbps-install -y gnome-browser-connector
+
+# GNOME Web (Epiphany)
+sudo xbps-install -y epiphany
 
 # Optional: ZeroConf support (Void docs mention this for GNOME + printing)
 # sudo xbps-install -y avahi nss-mdns
@@ -593,69 +718,13 @@ if [ -f /etc/default/grub ]; then
   echo "   Void GRUB theme installed and configured."
 fi
 
-# --- GNOME Extensions ---
-# Install gnome-shell-extension-installer CLI tool for unattended installs
-echo "   Installing GNOME Shell Extension Installer..."
-curl -sSLo /tmp/gnome-shell-extension-installer \
-  "https://github.com/brunelli/gnome-shell-extension-installer/raw/master/gnome-shell-extension-installer"
-chmod +x /tmp/gnome-shell-extension-installer
-sudo mv /tmp/gnome-shell-extension-installer /usr/local/bin/
-
-# Get current GNOME Shell version for extension compatibility
-GNOME_VER=$(gnome-shell --version 2>/dev/null | grep -oP '[0-9]+' | head -1 || echo "")
-echo "   GNOME Shell version: $GNOME_VER"
-echo "   Installing extensions..."
-
-# Track installed extension UUIDs for auto-enabling via dconf
-INSTALLED_UUIDS=()
-
-# Extension IDs from extensions.gnome.org
-#
-# Trimmed from original gist for GNOME 48 compatibility.
-# Many original extensions are abandoned or now built into GNOME 43+ Quick
-# Settings (Bluetooth, audio device switching, power/suspend controls).
-# User Themes is provided by the gnome-shell-extensions system package.
-EXTENSIONS=(
-  4839  # Clipboard History
-  307   # Dash to Dock
-  904   # Disconnect Wifi
-  2     # Frippery Move Clock
-  755   # Hibernate Status Button
-  1218  # Printers
-  1634  # Resource Monitor
-)
-
-for EXT_ID in "${EXTENSIONS[@]}"; do
-  gnome-shell-extension-installer "$EXT_ID" --yes 2>/dev/null || \
-    echo "   Warning: extension $EXT_ID failed to install"
-done
-
-# Collect UUIDs of all installed extensions to auto-enable them
-for EXT_DIR in "${HOME}"/.local/share/gnome-shell/extensions/*/; do
-  if [ -f "${EXT_DIR}metadata.json" ]; then
-    UUID=$(grep -oP '"uuid"\s*:\s*"\K[^"]+' "${EXT_DIR}metadata.json" 2>/dev/null || true)
-    if [ -n "$UUID" ]; then
-      INSTALLED_UUIDS+=("'${UUID}'")
-    fi
-  fi
-done
-
-# User Themes is provided by the gnome-shell-extensions system package
-# (installed earlier) — add its UUID so it gets enabled too
-INSTALLED_UUIDS+=("'user-theme@gnome-shell-extensions.gcampax.github.com'")
-
-echo "   Extensions installed and will be auto-enabled on first login."
+# --- GNOME Extensions (install + configure) ---
+setup_extensions
 
 # --- Apply GNOME settings via dconf ---
 # dbus-launch gsettings from a TTY is unreliable — write directly to dconf
 # database instead. This is the canonical approach for pre-login configuration.
-echo "   Writing GNOME dconf settings (fonts, theme, icons, cursor, wallpaper, extensions)..."
-
-# Build the enabled-extensions line from collected UUIDs
-EXTENSIONS_DCONF="[]"
-if [ ${#INSTALLED_UUIDS[@]} -gt 0 ]; then
-  EXTENSIONS_DCONF="[$(IFS=, ; echo "${INSTALLED_UUIDS[*]}")]"
-fi
+echo "   Writing GNOME dconf settings (fonts, theme, icons, cursor, wallpaper)..."
 
 # Ensure dconf directory exists for the user
 DCONF_DB="${HOME}/.config/dconf"
@@ -685,15 +754,9 @@ picture-options='zoom'
 [org/gnome/desktop/screensaver]
 picture-uri='file://${VOID_WALL}'
 
-[org/gnome/shell/extensions/user-theme]
-name='Fluent-dark'
-
-[org/gnome/shell]
-enabled-extensions=${EXTENSIONS_DCONF}
-
 DCONF
 
-echo "   GNOME dconf settings applied (fonts, theme, icons, cursor, wallpaper, extensions)."
+echo "   GNOME dconf settings applied (fonts, theme, icons, cursor, wallpaper)."
 
 ###############################################################################
 # Flatpak + Flathub
