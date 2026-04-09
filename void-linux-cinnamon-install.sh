@@ -733,7 +733,7 @@ palette = 7=#d2d2d6
 palette = 15=#ececf0
 
 # Window
-window-theme = system
+window-theme = dark
 
 # Keybindings
 keybind = performable:ctrl+c=copy_to_clipboard
