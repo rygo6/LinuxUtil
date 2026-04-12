@@ -35,7 +35,7 @@ sudo xbps-install -S -y void-repo-nonfree
 # Install recommended packages
 ###############################################################################
 echo ">>> Installing recommended packages..."
-sudo xbps-install -y curl wget git xz unzip zip nano vim gptfdisk gparted \
+sudo xbps-install -Sy curl wget git xz unzip zip nano vim gptfdisk gparted \
   mtools mlocate ntfs-3g fuse-exfat bash-completion \
   linux-mainline linux-mainline-headers \
   ffmpeg htop zsh efibootmgr pciutils openssh \
