@@ -56,13 +56,22 @@ sudo xbps-install -Sy \
 echo ">>> Installing OpenGL and Vulkan development headers..."
 sudo xbps-install -Sy \
     MesaLib-devel \
-    mesa-vulkan-layers \
+    mesa-vulkan-overlay-layer \
     vulkan-loader \
     vulkan-loader-devel \
-    vulkan-headers \
-    vulkan-tools \
+    Vulkan-Headers \
+    Vulkan-Tools \
     libglvnd-devel \
     glu-devel
+
+###############################################################################
+# Debuggers and profiling tools
+###############################################################################
+echo ">>> Installing debuggers and profiling tools..."
+sudo xbps-install -Sy \
+    gdb \
+    lldb21 \
+    valgrind
 
 ###############################################################################
 # raylib build dependencies
