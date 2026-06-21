@@ -50,5 +50,5 @@ remote_run() {
     rpath="/tmp/remote-payload-$$.sh"
     $SCP "$payload" "$REMOTE":"$rpath" >/dev/null
     rm -f "$payload"
-    $SSH -t "$REMOTE" "bash '$rpath'; rc=\$?; rm -f '$rpath'; exit \$rc"
+    $SSH -t "$REMOTE" "bash '$rpath'; rc=\$?; rm -f '$rpath'; exit \$rc" < /dev/tty
 }

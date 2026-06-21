@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Install Mesa 26.1 via the kisak-mesa PPA.
-# Written for Ubuntu 26.04 (Resolute); also runs on 24.04 (Noble) and 22.04
-# (Jammy), but 22.04 may only reach Mesa 25.x — its LLVM/glibc are too old
-# for Mesa 26.1 backports. The version check below will warn if that happens.
+# Supported Ubuntu releases: 24.04 (Noble), 25.10 (Questing), 26.04 (Resolute).
+# Ubuntu 22.04 (Jammy) is discontinued from this PPA — use ppa:kisak/turtle
+# (kisak-mesa stable) instead, but that only reaches Mesa 25.0 on Jammy.
+# Upgrading to 24.04+ is required for Mesa 26.1.
 # kisak-mesa tracks upstream Mesa releases closely and is the standard
 # way to get a newer Mesa than Ubuntu ships without building from source.
 
@@ -29,8 +30,9 @@ echo "    Candidate: $AVAILABLE"
 if [[ "$AVAILABLE" < "$MESA_TARGET" ]]; then
     echo ""
     echo "WARNING: PPA candidate ($AVAILABLE) is older than $MESA_TARGET."
-    echo "         The PPA may not have published 26.1 for Ubuntu 26.04 yet."
-    echo "         You can wait for the PPA to update, or build from source."
+    echo "         This Ubuntu release may not have Mesa 26.1 in kisak-mesa."
+    echo "         Ubuntu 22.04 is discontinued; upgrade to 24.04+ for Mesa 26.1."
+    echo "         Otherwise wait for the PPA to update, or build from source."
     echo "         Proceeding with whatever the PPA provides..."
 fi
 

@@ -4,25 +4,21 @@ set -euo pipefail
 ###############################################################################
 # setup-dev-tools-remote.sh
 #
-# Provisions a remote Ubuntu/Debian machine over SSH by orchestrating the
-# individual setup-*-remote.sh scripts (each also runnable standalone):
+# Provisions a remote Ubuntu/Debian machine over SSH by orchestrating every
+# setup-*-remote.sh script in this directory (each also runnable standalone).
 #
-#   setup-git-credentials-remote.sh     SSH key + gitconfig
-#   setup-git-remote.sh                 latest git + git-lfs (+ prerequisites)
-#   setup-clang-remote.sh               clang, asan, lldb, clangd
-#   setup-vulkan-remote.sh              LunarG Vulkan SDK
-#   setup-vscode-remote.sh              VS Code
-#   setup-ghostty-remote.sh             Ghostty + config
-#   setup-claude-remote.sh              Claude Code
-#   setup-claude-credentials-remote.sh  Claude credentials + onboarding state
+# A single SSH master connection is opened and shared with every sub-script
+# (via SSH_CONTROL_PATH), so you authenticate only once over SSH.
 #
-# A single SSH master connection is opened here and shared with every
-# sub-script (via SSH_CONTROL_PATH), so you authenticate only once.
+# sudo is authenticated once at the start; a temporary NOPASSWD sudoers entry
+# is written for the duration of the run so sub-scripts never re-prompt.
+# The entry is removed on exit (even on failure).
 #
 # Usage: ./setup-dev-tools-remote.sh user@host
 ###############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/remote-lib.sh"
 
 if [ -z "${1:-}" ]; then
     echo "Usage: $0 user@host"
@@ -30,20 +26,32 @@ if [ -z "${1:-}" ]; then
 fi
 REMOTE="$1"
 
-# Open one master connection (authenticate once) and share it with the
-# sub-scripts. remote-lib.sh reuses SSH_CONTROL_PATH when it points at a live
-# socket, so the children skip their own authentication.
-export SSH_CONTROL_PATH="/tmp/ssh-setup-$$"
-ssh -M -f -N -o ControlPath="$SSH_CONTROL_PATH" "$REMOTE"
-trap 'ssh -O exit -o ControlPath="$SSH_CONTROL_PATH" "$REMOTE" 2>/dev/null' EXIT
+# Open master connection manually so we own the trap.
+SOCKET="/tmp/ssh-setup-$$"
+ssh -M -f -N -o ControlPath="$SOCKET" "$REMOTE"
+SSH="ssh -o ControlPath=$SOCKET"
+SCP="scp -o ControlPath=$SOCKET"
 
-"$SCRIPT_DIR/setup-git-credentials-remote.sh"    "$REMOTE"
-"$SCRIPT_DIR/setup-git-remote.sh"                "$REMOTE"
-"$SCRIPT_DIR/setup-clang-remote.sh"              "$REMOTE"
-"$SCRIPT_DIR/setup-vulkan-remote.sh"             "$REMOTE"
-"$SCRIPT_DIR/setup-vscode-remote.sh"             "$REMOTE"
-"$SCRIPT_DIR/setup-ghostty-remote.sh"            "$REMOTE"
-"$SCRIPT_DIR/setup-claude-remote.sh"             "$REMOTE"
-"$SCRIPT_DIR/setup-claude-credentials-remote.sh" "$REMOTE"
+cleanup() {
+    $SSH "$REMOTE" "sudo rm -f /etc/sudoers.d/99-setup-temp" 2>/dev/null || true
+    ssh -O exit -o ControlPath="$SOCKET" "$REMOTE" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Export so sub-scripts reuse this socket instead of opening their own.
+export SSH_CONTROL_PATH="$SOCKET"
+
+# Authenticate sudo once; write a temp NOPASSWD entry so no sub-script re-prompts.
+echo ">>> Authenticating sudo on $REMOTE (you will be prompted once)..."
+remote_run <<'EOF'
+sudo -v
+echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/99-setup-temp > /dev/null
+sudo chmod 440 /etc/sudoers.d/99-setup-temp
+EOF
+
+for script in "$SCRIPT_DIR"/setup-*-remote.sh; do
+    [ "$script" = "${BASH_SOURCE[0]}" ] && continue
+    "$script" "$REMOTE"
+done
 
 echo "Done. Dev tools installed and credentials transferred to $REMOTE"
