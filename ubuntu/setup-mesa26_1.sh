@@ -9,6 +9,17 @@ set -euo pipefail
 # kisak-mesa tracks upstream Mesa releases closely and is the standard
 # way to get a newer Mesa than Ubuntu ships without building from source.
 
+if [[ ! -r /etc/os-release ]]; then
+    echo "ERROR: Cannot detect the operating system." >&2
+    exit 1
+fi
+
+. /etc/os-release
+if [[ "${ID:-}" != "ubuntu" ]]; then
+    echo "ERROR: setup-mesa26_1.sh is Ubuntu-only; Launchpad PPAs are not supported on Debian." >&2
+    exit 1
+fi
+
 MESA_TARGET="26.1"
 
 echo "==> Current Mesa version:"

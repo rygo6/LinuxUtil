@@ -1,23 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 ###############################################################################
-# setup-vulkan-remote.sh
+# setup-vulkan.sh
 #
-# Installs the LunarG Vulkan SDK (tarball method) on a remote Ubuntu/Debian
-# machine over SSH. The SDK env is sourced via ~/.bashrc and the headers,
-# loader, and layers are copied into /usr/local.
+# Installs the LunarG Vulkan SDK (tarball method) on the local Ubuntu/Debian
+# machine. The SDK env is sourced via ~/.bashrc and the headers, loader, and
+# layers are copied into /usr/local.
 #
-# Usage: ./setup-vulkan-remote.sh user@host
+# Usage: ./setup-vulkan.sh
 ###############################################################################
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/remote-lib.sh"
-remote_connect "${1:-}"
-
-echo ">>> Installing LunarG Vulkan SDK on $REMOTE..."
-remote_run <<'REMOTE_EOF'
-#!/bin/bash
-set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # curl is needed to query/download the SDK.
@@ -80,4 +72,3 @@ sudo cp "${layer_json_dir}"/VkLayer_*.json /usr/local/share/vulkan/explicit_laye
 
 sudo ldconfig
 echo "    Vulkan SDK files copied to /usr/local"
-REMOTE_EOF

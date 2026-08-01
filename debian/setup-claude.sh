@@ -1,24 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 ###############################################################################
-# setup-claude-remote.sh
+# setup-claude.sh
 #
-# Installs Claude Code on a remote Ubuntu/Debian machine over SSH, and ensures
+# Installs Claude Code on the local Ubuntu/Debian machine and ensures
 # ~/.local/bin (Claude's install location) is on PATH for future shells.
 #
-# Credentials are handled separately by setup-claude-credentials-remote.sh.
+# Credentials can be copied to another machine with
+# ../transfer-claude-credentials.sh.
 #
-# Usage: ./setup-claude-remote.sh user@host
+# Usage: ./setup-claude.sh
 ###############################################################################
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/remote-lib.sh"
-remote_connect "${1:-}"
-
-echo ">>> Installing Claude Code on $REMOTE..."
-remote_run <<'REMOTE_EOF'
-#!/bin/bash
-set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # curl is needed by the Claude installer.
@@ -38,4 +31,3 @@ if ! grep -qs '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 fi
 echo ">>> Claude Code install complete."
-REMOTE_EOF

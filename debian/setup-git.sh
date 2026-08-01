@@ -1,22 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 ###############################################################################
-# setup-git-remote.sh
+# setup-git.sh
 #
-# Installs the latest git + git-lfs (and shared prerequisites) on a remote
-# Ubuntu/Debian machine over SSH.
+# Installs the latest git + git-lfs (and shared prerequisites) on the local
+# Ubuntu/Debian machine.
 #
-# Usage: ./setup-git-remote.sh user@host
+# Usage: ./setup-git.sh
 ###############################################################################
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/remote-lib.sh"
-remote_connect "${1:-}"
-
-echo ">>> Installing latest git + git-lfs on $REMOTE..."
-remote_run <<'REMOTE_EOF'
-#!/bin/bash
-set -e
 
 if [[ ! -f /etc/os-release ]]; then
     echo "ERROR: Cannot detect OS — /etc/os-release not found." >&2
@@ -47,4 +38,3 @@ sudo apt-get install -y git git-lfs
 # Initialize git-lfs for this user
 git lfs install
 echo ">>> git + git-lfs installed."
-REMOTE_EOF
