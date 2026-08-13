@@ -22,6 +22,7 @@ SCRIPTS=(
     setup-vscode.sh
     setup-ghostty.sh
     setup-claude.sh
+    setup-codex.sh
 )
 
 echo ">>> Authenticating sudo for local setup..."

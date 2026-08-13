@@ -4,8 +4,9 @@ set -euo pipefail
 ###############################################################################
 # setup-agent-skills.sh
 #
-# Installs the rygo6 *-AGENTS skills into ~/.agents/skills and links them into
-# ~/.claude/skills and ~/.codex/skills, per each repo's README.
+# Installs all rygo6 *-AGENTS skills used on this machine into ~/.agents/skills
+# and links them into ~/.claude/skills and ~/.codex/skills, per each repo's
+# README.
 #
 #   concise  https://github.com/rygo6/Concise-AGENTS   (no submodules)
 #   openxr   https://github.com/rygo6/OpenXR-AGENTS
@@ -24,6 +25,7 @@ set -euo pipefail
 
 AGENTS_DIR="$HOME/.agents/skills"
 LINK_DIRS=("$HOME/.claude/skills" "$HOME/.codex/skills")
+REPO_OWNER="rygo6"
 
 # skill|repo|submodules
 SKILLS=(
@@ -66,8 +68,19 @@ for name in "${selected[@]}"; do
     fi
 
     dest="$AGENTS_DIR/$name"
+    expected_ssh="git@github.com:$REPO_OWNER/$repo.git"
+    expected_https="https://github.com/$REPO_OWNER/$repo.git"
 
     if [[ -d "$dest/.git" ]]; then
+        origin="$(git -C "$dest" remote get-url origin 2>/dev/null || true)"
+        if [[ "$origin" != "$expected_ssh" &&
+              "$origin" != "$expected_https" &&
+              "$origin" != "${expected_https%.git}" ]]; then
+            echo "ERROR: $dest is not the expected $REPO_OWNER/$repo clone." >&2
+            echo "    Found origin: ${origin:-<none>}" >&2
+            echo "    Expected: $expected_ssh" >&2
+            exit 1
+        fi
         echo ">>> Updating $name in $dest..."
         git -C "$dest" pull --ff-only
     elif [[ -e "$dest" ]]; then
@@ -78,15 +91,20 @@ for name in "${selected[@]}"; do
         mkdir -p "$AGENTS_DIR"
         if [[ "$submodules" == "yes" ]]; then
             git clone --recurse-submodules \
-                "git@github.com:rygo6/$repo.git" "$dest"
+                "$expected_ssh" "$dest"
         else
-            git clone "git@github.com:rygo6/$repo.git" "$dest"
+            git clone "$expected_ssh" "$dest"
         fi
     fi
 
     if [[ "$submodules" == "yes" ]]; then
         echo ">>> Updating $name reference submodules..."
         git -C "$dest" submodule update --init --remote
+    fi
+
+    if [[ ! -f "$dest/SKILL.md" ]]; then
+        echo "ERROR: $dest does not contain SKILL.md." >&2
+        exit 1
     fi
 
     for link_dir in "${LINK_DIRS[@]}"; do
@@ -102,4 +120,6 @@ for name in "${selected[@]}"; do
 done
 
 echo ">>> Agent skills install complete."
-echo "    Invoke them with /concise, /openxr, /vulkan, /webxr."
+printf "    Installed:"
+printf " /%s" "${selected[@]}"
+printf '\n'

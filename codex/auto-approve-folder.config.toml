@@ -1,0 +1,8 @@
+# Use with: codex -p auto-approve-folder
+#
+# Commands run without approval prompts, but remain restricted to Codex's
+# workspace-write sandbox (the current folder/workspace and temporary paths).
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
