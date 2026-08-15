@@ -1,42 +1,81 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
+
 ###############################################################################
 # setup-vscode.sh
 #
-# Installs VS Code (Microsoft apt repo), marketplace extensions, the Dark
-# Legacy custom theme, and user settings on the local Ubuntu/Debian machine.
+# Installs VS Code (Microsoft apt repo), marketplace extensions, and user
+# settings on the local Ubuntu/Debian machine.
 #
 # Usage: ./setup-vscode.sh
 ###############################################################################
 
-export DEBIAN_FRONTEND=noninteractive
-
-DARK_LEGACY_THEME="$HOME/.vscode/extensions/dark-legacy-theme/themes/dark-legacy.json"
-if [[ ! -f "$DARK_LEGACY_THEME" ]]; then
-    echo "ERROR: Dark Legacy theme not found at $DARK_LEGACY_THEME" >&2
+if [[ ! -r /etc/os-release ]]; then
+    echo "ERROR: Cannot detect the operating system." >&2
     exit 1
 fi
+
+. /etc/os-release
+case " ${ID:-} ${ID_LIKE:-} " in
+    *" debian "*|*" ubuntu "*) ;;
+    *)
+        echo "ERROR: This script supports Debian and Ubuntu-based Linux only." >&2
+        exit 1
+        ;;
+esac
+
+if (( EUID == 0 )); then
+    echo "ERROR: Run this script as a normal user; it invokes sudo when needed." >&2
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
 
 echo ">>> Setting up VS Code locally..."
 
 ########################################
 # Install VS Code
 ########################################
+echo ">>> Installing or updating VS Code..."
+sudo apt-get update -q
+sudo apt-get install -y wget gpg
+
+MICROSOFT_KEY_TMP="$(mktemp)"
+cleanup_key() {
+    rm -f -- "$MICROSOFT_KEY_TMP"
+}
+trap cleanup_key EXIT
+
+wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor --yes --output "$MICROSOFT_KEY_TMP"
+sudo install -D -o root -g root -m 644 \
+    "$MICROSOFT_KEY_TMP" /usr/share/keyrings/microsoft.gpg
+
+sudo tee /etc/apt/sources.list.d/vscode.sources >/dev/null <<'VSCODE_SOURCES_EOF'
+Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64 arm64 armhf
+Signed-By: /usr/share/keyrings/microsoft.gpg
+VSCODE_SOURCES_EOF
+
+# Remove the legacy one-line source created by older versions of this script.
+LEGACY_VSCODE_SOURCE="/etc/apt/sources.list.d/vscode.list"
+if [[ -f "$LEGACY_VSCODE_SOURCE" ]] && \
+    grep -q 'packages.microsoft.com/repos/code' "$LEGACY_VSCODE_SOURCE"; then
+    sudo rm -f -- "$LEGACY_VSCODE_SOURCE"
+fi
+
+cleanup_key
+trap - EXIT
+
+sudo apt-get update -q
+sudo apt-get install -y code
+
 if ! command -v code >/dev/null 2>&1; then
-    echo ">>> Installing VS Code..."
-    sudo apt-get update -q
-    sudo apt-get install -y wget gpg apt-transport-https
-    wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
-        | gpg --dearmor > /tmp/packages.microsoft.gpg
-    sudo install -D -o root -g root -m 644 \
-        /tmp/packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-    echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
-        | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
-    rm -f /tmp/packages.microsoft.gpg
-    sudo apt-get update -q
-    sudo apt-get install -y code
-else
-    echo ">>> VS Code already installed — skipping."
+    echo "ERROR: The 'code' CLI is not on PATH after installation." >&2
+    exit 1
 fi
 
 ########################################
@@ -44,15 +83,26 @@ fi
 ########################################
 echo ">>> Installing extensions..."
 EXTENSIONS=(
+    anthropic.claude-code
+    donjayamanne.githistory
+    llvm-vs-code-extensions.lldb-dap
     llvm-vs-code-extensions.vscode-clangd
-    monokai.theme-monokai-pro-vscode
+    ms-python.debugpy
+    ms-python.python
+    ms-python.vscode-pylance
+    ms-python.vscode-python-envs
     ms-vscode.cmake-tools
     ms-vscode.cpp-devtools
     ms-vscode.cpptools
+    ms-vscode.cpptools-extension-pack
     ms-vscode.cpptools-themes
     ms-vscode.makefile-tools
-    openai.chatgpt
+    ms-vscode.remote-explorer
+    pomber.git-file-history
+    shader-slang.slang-language-extension
+    swiftlang.swift-vscode
     vadimcn.vscode-lldb
+    waderyan.gitblame
     yo1dog.cursor-align
 )
 for ext in "${EXTENSIONS[@]}"; do
@@ -60,78 +110,29 @@ for ext in "${EXTENSIONS[@]}"; do
 done
 
 ########################################
-# Dark Legacy custom theme
-########################################
-echo ">>> Installing Dark Legacy theme..."
-THEME_DIR="$HOME/.vscode/extensions/dark-legacy-theme/themes"
-mkdir -p "$THEME_DIR"
-
-cat > "$HOME/.vscode/extensions/dark-legacy-theme/package.json" << 'PKGJSON'
-{
-  "name": "dark-legacy-theme",
-  "displayName": "Dark Legacy Theme",
-  "version": "1.0.0",
-  "publisher": "local",
-  "engines": { "vscode": "*" },
-  "contributes": {
-    "themes": [
-      {
-        "id": "Dark Legacy",
-        "label": "Dark Legacy",
-        "uiTheme": "vs-dark",
-        "path": "./themes/dark-legacy.json"
-      }
-    ]
-  }
-}
-PKGJSON
-
-# Copy the include chain from the VS Code built-in themes
-VSCODE_THEMES="/usr/share/code/resources/app/extensions/theme-defaults/themes"
-for f in dark_modern.json dark_plus.json dark_vs.json; do
-    cp "$VSCODE_THEMES/$f" "$THEME_DIR/$f"
-done
-
-# Register the theme in the extensions manifest
-python3 - << 'PYEOF'
-import json, os
-path = os.path.expanduser("~/.vscode/extensions/extensions.json")
-try:
-    with open(path) as f:
-        exts = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    exts = []
-entry_id = "local.dark-legacy-theme"
-if not any(e["identifier"]["id"] == entry_id for e in exts):
-    home = os.path.expanduser("~")
-    exts.insert(0, {
-        "identifier": {"id": entry_id},
-        "version": "1.0.0",
-        "location": {
-            "$mid": 1,
-            "path": f"{home}/.vscode/extensions/dark-legacy-theme",
-            "scheme": "file"
-        },
-        "relativeLocation": "dark-legacy-theme",
-        "metadata": {"installedTimestamp": 0, "source": "vsix",
-                     "isPreReleaseVersion": False, "hasPreReleaseVersion": False}
-    })
-    with open(path, "w") as f:
-        json.dump(exts, f)
-    print("Registered dark-legacy-theme in extensions.json")
-else:
-    print("dark-legacy-theme already registered — skipping.")
-PYEOF
-
-########################################
 # User settings
+# Dark 2026 is bundled with VS Code, so no separate theme file is required.
 ########################################
 echo ">>> Writing VS Code settings..."
 mkdir -p "$HOME/.config/Code/User"
 cat > "$HOME/.config/Code/User/settings.json" << 'SETTINGSJSON'
 {
-    "makefile.configureOnOpen": true,
+    "workbench.colorTheme": "Dark 2026",
+    "claudeCode.preferredLocation": "panel",
+    "gitlens.ai.model": "vscode",
+    "gitlens.ai.vscode.model": "copilot:gpt-4.1",
+    "github.copilot.enable": {
+        "*": false,
+        "plaintext": false,
+        "markdown": false,
+        "scminput": false
+    },
+    "diffEditor.ignoreTrimWhitespace": true,
+    "git.openRepositoryInParentFolders": "always",
     "C_Cpp.intelliSenseEngine": "disabled",
+    "editor.parameterHints.enabled": false,
+    "editor.inlayHints.enabled": "off",
+    "makefile.configureOnOpen": true,
     "editor.semanticTokenColorCustomizations": {
         "[Dark 2026]": {
             "rules": {
@@ -175,8 +176,7 @@ cat > "$HOME/.config/Code/User/settings.json" << 'SETTINGSJSON'
                 }
             ]
         }
-    },
-    "chat.disableAIFeatures": true
+    }
 }
 SETTINGSJSON
 
