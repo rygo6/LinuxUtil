@@ -6,6 +6,7 @@ set -euo pipefail
 #
 # Installs Microsoft's Visual Studio Code build from the AUR, marketplace
 # extensions, and user settings on Arch Linux.
+# Safe to rerun: verified items are skipped and missing items are repaired.
 #
 # Usage: ./setup-vscode.sh
 ###############################################################################
@@ -27,6 +28,7 @@ if (( EUID == 0 )); then
 fi
 
 echo ">>> Setting up VS Code locally..."
+SETUP_FAILED=0
 
 ###############################################################################
 # Install or update Microsoft's VS Code build
@@ -59,15 +61,23 @@ else
     trap - EXIT
 fi
 
+if ! pacman -Q visual-studio-code-bin >/dev/null 2>&1; then
+    echo "ERROR: Arch package verification failed: visual-studio-code-bin" >&2
+    exit 1
+fi
+
 if ! command -v code >/dev/null 2>&1; then
     echo "ERROR: The 'code' CLI is not on PATH after installation." >&2
     exit 1
 fi
+CODE_VERSION="$(code --version)"
+CODE_VERSION="${CODE_VERSION%%$'\n'*}"
+echo ">>> Verified VS Code $CODE_VERSION."
 
 ###############################################################################
 # Marketplace extensions
 ###############################################################################
-echo ">>> Installing extensions..."
+echo ">>> Verifying extensions..."
 EXTENSIONS=(
     anthropic.claude-code
     donjayamanne.githistory
@@ -91,17 +101,42 @@ EXTENSIONS=(
     waderyan.gitblame
     yo1dog.cursor-align
 )
+INSTALLED_EXTENSIONS="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
 for extension in "${EXTENSIONS[@]}"; do
-    code --install-extension "$extension" --force
+    if grep -Fqx -- "$extension" <<<"$INSTALLED_EXTENSIONS"; then
+        echo "    verified: $extension"
+    elif code --install-extension "$extension"; then
+        echo "    installed: $extension"
+        INSTALLED_EXTENSIONS="${INSTALLED_EXTENSIONS}"$'\n'"${extension}"
+    else
+        echo "ERROR: Failed to install extension: $extension" >&2
+        SETUP_FAILED=1
+    fi
+done
+
+INSTALLED_EXTENSIONS="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
+for extension in "${EXTENSIONS[@]}"; do
+    if ! grep -Fqx -- "$extension" <<<"$INSTALLED_EXTENSIONS"; then
+        echo "ERROR: Required extension is still missing: $extension" >&2
+        SETUP_FAILED=1
+    fi
 done
 
 ###############################################################################
 # User settings
 # Dark 2026 is bundled with VS Code, so no separate theme file is required.
 ###############################################################################
-echo ">>> Writing VS Code settings..."
-mkdir -p "$HOME/.config/Code/User"
-cat > "$HOME/.config/Code/User/settings.json" <<'SETTINGS_JSON_EOF'
+echo ">>> Verifying VS Code settings..."
+SETTINGS_DIR="$HOME/.config/Code/User"
+mkdir -p "$SETTINGS_DIR"
+SETTINGS_FILE="$SETTINGS_DIR/settings.json"
+SETTINGS_TMP="$(mktemp)"
+cleanup_settings() {
+    rm -f -- "$SETTINGS_TMP"
+}
+trap cleanup_settings EXIT
+
+cat > "$SETTINGS_TMP" <<'SETTINGS_JSON_EOF'
 {
     "workbench.colorTheme": "Dark 2026",
     "claudeCode.preferredLocation": "panel",
@@ -166,4 +201,24 @@ cat > "$HOME/.config/Code/User/settings.json" <<'SETTINGS_JSON_EOF'
 }
 SETTINGS_JSON_EOF
 
-echo ">>> VS Code setup complete."
+if [[ -f "$SETTINGS_FILE" ]] && cmp -s "$SETTINGS_TMP" "$SETTINGS_FILE"; then
+    echo "    verified: $SETTINGS_FILE"
+else
+    install -m 644 "$SETTINGS_TMP" "$SETTINGS_FILE"
+    echo "    updated: $SETTINGS_FILE"
+fi
+
+if ! cmp -s "$SETTINGS_TMP" "$SETTINGS_FILE"; then
+    echo "ERROR: VS Code settings verification failed: $SETTINGS_FILE" >&2
+    SETUP_FAILED=1
+fi
+
+cleanup_settings
+trap - EXIT
+
+if (( SETUP_FAILED != 0 )); then
+    echo "ERROR: VS Code setup finished with verification failures." >&2
+    exit 1
+fi
+
+echo ">>> VS Code setup complete and verified."

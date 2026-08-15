@@ -6,6 +6,7 @@ set -euo pipefail
 #
 # Installs VS Code (Microsoft apt repo), marketplace extensions, and user
 # settings on the local Ubuntu/Debian machine.
+# Safe to rerun: verified items are skipped and missing items are repaired.
 #
 # Usage: ./setup-vscode.sh
 ###############################################################################
@@ -32,6 +33,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 
 echo ">>> Setting up VS Code locally..."
+SETUP_FAILED=0
 
 ########################################
 # Install VS Code
@@ -41,17 +43,25 @@ sudo apt-get update -q
 sudo apt-get install -y wget gpg
 
 MICROSOFT_KEY_TMP="$(mktemp)"
-cleanup_key() {
+VSCODE_SOURCE_TMP="$(mktemp)"
+cleanup_repository_temp() {
     rm -f -- "$MICROSOFT_KEY_TMP"
+    rm -f -- "$VSCODE_SOURCE_TMP"
 }
-trap cleanup_key EXIT
+trap cleanup_repository_temp EXIT
 
 wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
     | gpg --dearmor --yes --output "$MICROSOFT_KEY_TMP"
-sudo install -D -o root -g root -m 644 \
-    "$MICROSOFT_KEY_TMP" /usr/share/keyrings/microsoft.gpg
+MICROSOFT_KEY="/usr/share/keyrings/microsoft.gpg"
+if [[ -f "$MICROSOFT_KEY" ]] && cmp -s "$MICROSOFT_KEY_TMP" "$MICROSOFT_KEY"; then
+    echo ">>> Verified Microsoft repository signing key."
+else
+    sudo install -D -o root -g root -m 644 \
+        "$MICROSOFT_KEY_TMP" "$MICROSOFT_KEY"
+    echo ">>> Updated Microsoft repository signing key."
+fi
 
-sudo tee /etc/apt/sources.list.d/vscode.sources >/dev/null <<'VSCODE_SOURCES_EOF'
+cat > "$VSCODE_SOURCE_TMP" <<'VSCODE_SOURCES_EOF'
 Types: deb
 URIs: https://packages.microsoft.com/repos/code
 Suites: stable
@@ -60,28 +70,47 @@ Architectures: amd64 arm64 armhf
 Signed-By: /usr/share/keyrings/microsoft.gpg
 VSCODE_SOURCES_EOF
 
+VSCODE_SOURCE="/etc/apt/sources.list.d/vscode.sources"
+if [[ -f "$VSCODE_SOURCE" ]] && cmp -s "$VSCODE_SOURCE_TMP" "$VSCODE_SOURCE"; then
+    echo ">>> Verified Microsoft VS Code apt source."
+else
+    sudo install -D -o root -g root -m 644 \
+        "$VSCODE_SOURCE_TMP" "$VSCODE_SOURCE"
+    echo ">>> Updated Microsoft VS Code apt source."
+fi
+
 # Remove the legacy one-line source created by older versions of this script.
 LEGACY_VSCODE_SOURCE="/etc/apt/sources.list.d/vscode.list"
 if [[ -f "$LEGACY_VSCODE_SOURCE" ]] && \
     grep -q 'packages.microsoft.com/repos/code' "$LEGACY_VSCODE_SOURCE"; then
     sudo rm -f -- "$LEGACY_VSCODE_SOURCE"
+    echo ">>> Removed legacy duplicate VS Code apt source."
 fi
 
-cleanup_key
+cleanup_repository_temp
 trap - EXIT
 
 sudo apt-get update -q
 sudo apt-get install -y code
 
+if ! dpkg-query -W -f='${Status}\n' code 2>/dev/null | \
+    grep -Fqx 'install ok installed'; then
+    echo "ERROR: Debian package verification failed: code" >&2
+    exit 1
+fi
+
 if ! command -v code >/dev/null 2>&1; then
     echo "ERROR: The 'code' CLI is not on PATH after installation." >&2
     exit 1
 fi
+CODE_VERSION="$(code --version)"
+CODE_VERSION="${CODE_VERSION%%$'\n'*}"
+echo ">>> Verified VS Code $CODE_VERSION."
 
 ########################################
 # Marketplace extensions
 ########################################
-echo ">>> Installing extensions..."
+echo ">>> Verifying extensions..."
 EXTENSIONS=(
     anthropic.claude-code
     donjayamanne.githistory
@@ -105,17 +134,42 @@ EXTENSIONS=(
     waderyan.gitblame
     yo1dog.cursor-align
 )
-for ext in "${EXTENSIONS[@]}"; do
-    code --install-extension "$ext" --force
+INSTALLED_EXTENSIONS="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
+for extension in "${EXTENSIONS[@]}"; do
+    if grep -Fqx -- "$extension" <<<"$INSTALLED_EXTENSIONS"; then
+        echo "    verified: $extension"
+    elif code --install-extension "$extension"; then
+        echo "    installed: $extension"
+        INSTALLED_EXTENSIONS="${INSTALLED_EXTENSIONS}"$'\n'"${extension}"
+    else
+        echo "ERROR: Failed to install extension: $extension" >&2
+        SETUP_FAILED=1
+    fi
+done
+
+INSTALLED_EXTENSIONS="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
+for extension in "${EXTENSIONS[@]}"; do
+    if ! grep -Fqx -- "$extension" <<<"$INSTALLED_EXTENSIONS"; then
+        echo "ERROR: Required extension is still missing: $extension" >&2
+        SETUP_FAILED=1
+    fi
 done
 
 ########################################
 # User settings
 # Dark 2026 is bundled with VS Code, so no separate theme file is required.
 ########################################
-echo ">>> Writing VS Code settings..."
-mkdir -p "$HOME/.config/Code/User"
-cat > "$HOME/.config/Code/User/settings.json" << 'SETTINGSJSON'
+echo ">>> Verifying VS Code settings..."
+SETTINGS_DIR="$HOME/.config/Code/User"
+mkdir -p "$SETTINGS_DIR"
+SETTINGS_FILE="$SETTINGS_DIR/settings.json"
+SETTINGS_TMP="$(mktemp)"
+cleanup_settings() {
+    rm -f -- "$SETTINGS_TMP"
+}
+trap cleanup_settings EXIT
+
+cat > "$SETTINGS_TMP" <<'SETTINGSJSON'
 {
     "workbench.colorTheme": "Dark 2026",
     "claudeCode.preferredLocation": "panel",
@@ -180,4 +234,24 @@ cat > "$HOME/.config/Code/User/settings.json" << 'SETTINGSJSON'
 }
 SETTINGSJSON
 
-echo ">>> VS Code setup complete."
+if [[ -f "$SETTINGS_FILE" ]] && cmp -s "$SETTINGS_TMP" "$SETTINGS_FILE"; then
+    echo "    verified: $SETTINGS_FILE"
+else
+    install -m 644 "$SETTINGS_TMP" "$SETTINGS_FILE"
+    echo "    updated: $SETTINGS_FILE"
+fi
+
+if ! cmp -s "$SETTINGS_TMP" "$SETTINGS_FILE"; then
+    echo "ERROR: VS Code settings verification failed: $SETTINGS_FILE" >&2
+    SETUP_FAILED=1
+fi
+
+cleanup_settings
+trap - EXIT
+
+if (( SETUP_FAILED != 0 )); then
+    echo "ERROR: VS Code setup finished with verification failures." >&2
+    exit 1
+fi
+
+echo ">>> VS Code setup complete and verified."
