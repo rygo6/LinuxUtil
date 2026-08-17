@@ -36,30 +36,39 @@ SETUP_FAILED=0
 echo ">>> Installing or updating visual-studio-code-bin from the AUR..."
 sudo pacman -Syu --needed --noconfirm base-devel git
 
-if command -v paru >/dev/null 2>&1; then
-    paru -S --needed --noconfirm visual-studio-code-bin
-elif command -v yay >/dev/null 2>&1; then
-    yay -S --needed --noconfirm visual-studio-code-bin
-else
-    AUR_BUILD_ROOT="$(mktemp -d)"
-    cleanup_aur_build() {
-        if [[ -n "${AUR_BUILD_ROOT:-}" && -d "$AUR_BUILD_ROOT" ]]; then
-            rm -rf -- "$AUR_BUILD_ROOT"
-        fi
-    }
-    trap cleanup_aur_build EXIT
+install_vscode_package() {
+    if command -v paru >/dev/null 2>&1; then
+        paru -S --needed --noconfirm visual-studio-code-bin
+    elif command -v yay >/dev/null 2>&1; then
+        yay -S --needed --noconfirm visual-studio-code-bin
+    else
+        local build_root
+        build_root="$(mktemp -d)"
+        local status=0
+        git clone https://aur.archlinux.org/visual-studio-code-bin.git \
+            "$build_root/visual-studio-code-bin" \
+        && (
+            cd "$build_root/visual-studio-code-bin"
+            makepkg -si --needed --noconfirm
+        ) || status=$?
+        rm -rf -- "$build_root"
+        return "$status"
+    fi
+}
 
-    git clone https://aur.archlinux.org/visual-studio-code-bin.git \
-        "$AUR_BUILD_ROOT/visual-studio-code-bin"
-    (
-        cd "$AUR_BUILD_ROOT/visual-studio-code-bin"
-        makepkg -si --needed --noconfirm
-    )
-
-    cleanup_aur_build
-    AUR_BUILD_ROOT=""
-    trap - EXIT
-fi
+# The VS Code CDN intermittently fails TLS handshakes, which makepkg's
+# downloader does not retry, so retry the whole install on failure.
+for attempt in 1 2 3; do
+    if install_vscode_package; then
+        break
+    fi
+    if (( attempt == 3 )); then
+        echo "ERROR: Failed to install visual-studio-code-bin after $attempt attempts." >&2
+        exit 1
+    fi
+    echo ">>> Install attempt $attempt failed; retrying in 15 seconds..."
+    sleep 15
+done
 
 if ! pacman -Q visual-studio-code-bin >/dev/null 2>&1; then
     echo "ERROR: Arch package verification failed: visual-studio-code-bin" >&2
