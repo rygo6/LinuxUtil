@@ -9,13 +9,18 @@ set -euo pipefail
 # README.
 #
 #   concise  https://github.com/rygo6/Concise-AGENTS   (no submodules)
+#   metal    https://github.com/rygo6/Metal-AGENTS
+#   opengl   https://github.com/rygo6/OpenGL-AGENTS
 #   openxr   https://github.com/rygo6/OpenXR-AGENTS
 #   vulkan   https://github.com/rygo6/Vulkan-AGENTS
+#   webgl    https://github.com/rygo6/WebGL-AGENTS
 #   webxr    https://github.com/rygo6/WebXR-AGENTS
 #
 # The reference repos are git submodules and are large — a full install pulls
 # several GB. Re-running the script updates existing clones instead of
-# recloning.
+# recloning. Submodules are initialized one level deep only; recursing into
+# them pulls tens of GB of build dependencies that no skill ever references,
+# and ANGLE's nested submodules fail outright on chrome-internal.googlesource.com.
 #
 # Clones over SSH, so an SSH key must be registered with GitHub; keys can be
 # copied from another machine with ./transfer-git-credentials.sh.
@@ -30,8 +35,11 @@ REPO_OWNER="rygo6"
 # skill|repo|submodules
 SKILLS=(
     "concise|Concise-AGENTS|no"
+    "metal|Metal-AGENTS|yes"
+    "opengl|OpenGL-AGENTS|yes"
     "openxr|OpenXR-AGENTS|yes"
     "vulkan|Vulkan-AGENTS|yes"
+    "webgl|WebGL-AGENTS|yes"
     "webxr|WebXR-AGENTS|yes"
 )
 
@@ -40,8 +48,22 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-selected=("$@")
-if [[ ${#selected[@]} -eq 0 ]]; then
+reset_gitlinks() {
+    local repo="$1"
+    local sm
+
+    [[ -f "$repo/.gitmodules" ]] || return 0
+
+    while read -r _ sm; do
+        [[ -n "$sm" ]] || continue
+        git -C "$repo" checkout -- "$sm" 2>/dev/null || true
+    done < <(git config -f "$repo/.gitmodules" --get-regexp '^submodule\..*\.path$' || true)
+}
+
+selected=()
+if [[ $# -gt 0 ]]; then
+    selected=("$@")
+else
     for entry in "${SKILLS[@]}"; do
         selected+=("${entry%%|*}")
     done
@@ -82,19 +104,24 @@ for name in "${selected[@]}"; do
             exit 1
         fi
         echo ">>> Updating $name in $dest..."
-        git -C "$dest" pull --ff-only
+        reset_gitlinks "$dest"
+        git -C "$dest" fetch --prune origin
+        upstream="$(git -C "$dest" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+        if [[ -z "$upstream" ]]; then
+            upstream="origin/master"
+        fi
+        if ! git -C "$dest" merge --ff-only "$upstream"; then
+            echo "ERROR: $dest could not fast-forward to $upstream." >&2
+            echo "    Resolve it by hand, then re-run this script." >&2
+            exit 1
+        fi
     elif [[ -e "$dest" ]]; then
         echo "ERROR: $dest exists but is not a git clone." >&2
         exit 1
     else
         echo ">>> Cloning $repo into $dest..."
         mkdir -p "$AGENTS_DIR"
-        if [[ "$submodules" == "yes" ]]; then
-            git clone --recurse-submodules \
-                "$expected_ssh" "$dest"
-        else
-            git clone "$expected_ssh" "$dest"
-        fi
+        git clone "$expected_ssh" "$dest"
     fi
 
     if [[ "$submodules" == "yes" ]]; then
