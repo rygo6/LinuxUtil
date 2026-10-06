@@ -33,6 +33,7 @@ window-theme = dark
 keybind = performable:ctrl+c=copy_to_clipboard
 keybind = performable:ctrl+v=paste_from_clipboard
 keybind = ctrl+shift+w=close_surface
+keybind = ctrl+shift+equal=equalize_splits
 
 # Splits
 split-divider-color = #ff8c42
