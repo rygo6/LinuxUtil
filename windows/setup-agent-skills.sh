@@ -46,7 +46,9 @@ case "$(uname -s)" in
         ;;
 esac
 
-WIN_HOME="$(cygpath -u "$USERPROFILE")"
+# USERPROFILE is missing when one MSYS runtime starts another (e.g. MSYS2's
+# bash from Git Bash), so fall back to asking Windows for the profile folder.
+WIN_HOME="$(cygpath -u "${USERPROFILE:-$(cygpath -w -F 40)}")"
 AGENTS_DIR="$WIN_HOME/.agents/skills"
 LINK_DIRS=("$WIN_HOME/.claude/skills" "$WIN_HOME/.codex/skills")
 REPO_OWNER="rygo6"
@@ -157,7 +159,8 @@ for name in "${selected[@]}"; do
     # MSYS reports both junctions and symlinks as -L. They are removed with
     # cmd's rmdir, which unlinks the reparse point without touching the
     # target; `rm -rf` on a junction would recurse into the clone.
-    # MSYS2_ARG_CONV_EXCL stops MSYS from rewriting /J and /c as paths.
+    # MSYS2_ARG_CONV_EXCL stops MSYS from rewriting /J and /c as paths, and
+    # cmd.exe is named in full because MSYS2's /usr/bin/cmd wraps $COMSPEC.
     for link_dir in "${LINK_DIRS[@]}"; do
         link="$link_dir/$name"
         if [[ -e "$link" && ! -L "$link" ]]; then
@@ -166,9 +169,9 @@ for name in "${selected[@]}"; do
         fi
         mkdir -p "$link_dir"
         if [[ -L "$link" ]]; then
-            MSYS2_ARG_CONV_EXCL='*' cmd /c rmdir "$(cygpath -w "$link")"
+            MSYS2_ARG_CONV_EXCL='*' cmd.exe /c rmdir "$(cygpath -w "$link")"
         fi
-        MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J \
+        MSYS2_ARG_CONV_EXCL='*' cmd.exe /c mklink /J \
             "$(cygpath -w "$link")" "$(cygpath -w "$dest")" >/dev/null
         echo "    Linked $link -> $dest"
     done

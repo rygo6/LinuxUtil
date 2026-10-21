@@ -26,7 +26,18 @@ set -euo pipefail
 # copied from another machine with ./transfer-git-credentials.sh.
 #
 # Usage: ./setup-agent-skills.sh [skill...]     (default: all of them)
+#
+# On Windows (Git Bash or MSYS2) this hands off to
+# windows/setup-agent-skills.sh, which links with NTFS junctions; `ln -s`
+# there silently copies the clone instead. From cmd or PowerShell, run
+# windows\setup-agent-skills.cmd.
 ###############################################################################
+
+case "$(uname -s)" in
+    MINGW*|MSYS*)
+        exec "$(dirname "$0")/windows/setup-agent-skills.sh" "$@"
+        ;;
+esac
 
 AGENTS_DIR="$HOME/.agents/skills"
 LINK_DIRS=("$HOME/.claude/skills" "$HOME/.codex/skills")
