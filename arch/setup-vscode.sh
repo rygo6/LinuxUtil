@@ -34,7 +34,7 @@ SETUP_FAILED=0
 # Install or update Microsoft's VS Code build
 ###############################################################################
 echo ">>> Installing or updating visual-studio-code-bin from the AUR..."
-sudo pacman -Syu --needed --noconfirm base-devel git
+sudo pacman -Syu --needed --noconfirm base-devel git ttf-dejavu
 
 install_vscode_package() {
     if command -v paru >/dev/null 2>&1; then
